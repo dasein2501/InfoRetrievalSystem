@@ -17,55 +17,50 @@ def preprocess_document(doc):
   return final
 
 def getRelevantDocuments(f,query=None):
-  """Get relevant documents for provided query or all docs.
+  """Get relevant documents for the provided query or all docs.
   @param String f: relative path to file.
   @param String query: query for which relevant docs. are returned
   """
-  relevant = np.array([line.split()[::2] for line in open("MED.REL")])
+  relevant = np.array([line.split()[::2] for line in open(f)])
   return relevant[relevant[:,0] == query, 1] if query else relevant[:,1]
 
-def read_file(file):
+def read_file(filepath):
   """Read file with given format.
   @param String file: path to file.
-  @return [String] corpus: collection of documents/queries.
+  @return Generator[Tuple]: [(id,doc)].
   """
-  #corpus = {}
-  f = open(file)
-  raw = f.read()
-  corpus = filter(None,re.split(r'\.I\s[0-9]+\r\n\.W\r\n',raw))
-
-  '''doc_id = 0
   doc = ""
-  new_doc = False
-
-  with open(file,"r") as f:
-    for line in f:
-      if re.search(r'\.I\s[0-9]+',line):# and re.search(r'\.W\r\n',line)
-        doc_id = line.split()[1]
-        new_doc = True
-        pass
-      elif not re.search(r'\.W\r\n',line) and new_doc:
-        doc = doc + line
-      else:'''
-  return corpus
+  doc_id = 0
+  file_format = "\.I\s(?P<doc_id>\d+)|(?!\.W)(?P<doc>.+)"
+  pattern = re.compile(file_format)
+  with open(filepath, 'r') as f: 
+      for line in f:
+          m = pattern.match(line)
+          if m and m.group("doc_id"):
+              if doc:
+                  yield tuple([doc_id,doc])
+                  doc = ""
+              doc_id = int(m.group("doc_id"))
+          elif m and m.group("doc"):
+              doc = doc + m.group("doc").strip('\n\r ')
 
 def create_dictionary(corpus):
   """Create dictionary and store it.
   @param [String] corpus: collection of documents.
   @return {dict} dictionary: dictionary of (word:id).
   """
-  pdocs = [preprocess_document(doc) for doc in corpus]
+  pdocs = [preprocess_document(doc[1]) for doc in corpus]
   dictionary = corpora.Dictionary(pdocs)
   dictionary.save('/tmp/irs.dict')
   return dictionary
 
 def docs2bows(corpus, dictionary):
-  """Create a bag-of-words for the corpus and store it.
+  """Create a bag-of-words for the corpus.
   @param [String] corpus: collection of documents.
   @param {dict} dictionary: dictionary of tokens.
   @return [[Tuple]] vectors: collection of bow for each doc.
   """
-  pdocs = [preprocess_document(d) for d in corpus]
+  pdocs = [preprocess_document(d[1]) for d in corpus]
   vectors = [dictionary.doc2bow(doc) for doc in pdocs]
   return vectors
 
@@ -103,14 +98,14 @@ def launch_query(corpus, q, model_type, model, dictionary, index, top):
   sim = index[q]
   ranking = sorted(enumerate(sim), key=itemgetter(1), reverse=True)
   for doc, score in ranking[:top]:
-    print "[ Score = " + "%.3f" % round(score,3) + " | Doc_ID: "+str(doc+1)+" ]\n" + corpus[doc];
+    print "[ Score = " + "%.3f" % round(score,3) + " | Doc_ID: "+str(corpus[doc][0])+" ]\n" + corpus[doc][1] + "\n"
 
 def usage():
   print '\nUsage: '
   print (
     sys.argv[0]+' [-h,--help] --model=[tf,tfidf] '+ 
-    '--corpus-file=<file2>' + 
-    ' --queries-file=<file1> --top=rank_entries '+
+    '--corpus-file=<file1>' + 
+    ' --queries-file=<file2> --top=rank_entries '+
     ' [offsetQuery] [finalQuery]\n'
   )
 
@@ -141,8 +136,13 @@ def main():
       top = int(a)
     else:
         assert False, "unhandled option"
-  queries = read_file(qfile)
-  corpus = read_file(cfile)
+
+  if not qfile:
+    queries = [('',raw_input('Enter your query: '))]
+  else:
+    queries = list(read_file(qfile))
+
+  corpus = list(read_file(cfile))
   if model_type == "tf":
     model, dictionary, index = create_TF_model(corpus)
   elif model_type == "tfidf":
@@ -153,9 +153,10 @@ def main():
   elif len(args) == 1:
     offset = int(args[0])
     end = offset + 1
+
   for q in queries[offset:end]:
-    print "\nResults of query " + str(queries.index(q)) + " : " + q
-    launch_query(corpus,q,model_type,model,dictionary,index,top)
+    print "\nResults of query " + str(q[0]) + ": " + q[1] +"\n"
+    launch_query(corpus,q[1],model_type,model,dictionary,index,top)
 
 if __name__ == "__main__":
     main()
